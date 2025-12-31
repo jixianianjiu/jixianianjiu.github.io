@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>西瓜冻de&#39;博客</title>
+  
+  <subtitle>🍉日子会像西瓜一样越来越甜🍉</subtitle>
+  <link href="http://jixiajianjiu.github.io/atom.xml" rel="self"/>
+  
+  <link href="http://jixiajianjiu.github.io/"/>
+  <updated>2025-03-20T15:22:25.844Z</updated>
+  <id>http://jixiajianjiu.github.io/</id>
+  
+  <author>
+    <name>西瓜冻</name>
+    
+  </author>
+  
+  <generator uri="https://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title>函数调用栈-知识点纠错和补充</title>
+    <link href="http://jixiajianjiu.github.io/posts/15f1dffb.html"/>
+    <id>http://jixiajianjiu.github.io/posts/15f1dffb.html</id>
+    <published>2025-03-20T14:21:40.000Z</published>
+    <updated>2025-03-20T15:22:25.844Z</updated>
+    
+    <content type="html"><![CDATA[<h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><p>看完王爽的《汇编语言》后，以及上学期的c语言学习之后，再次深入学习函数调用栈原理时，发现自己的笔记有很多错误和疏漏，所以在此进行纠正和补充。<br>也为了更深入更清晰的学习pwn的基础知识，毕竟pwn追求一个深度，对这些知识点不清晰明了是学不好的。<br>下面的知识都用x86（32位）来进行举例<br>在理解这些的基础上，我们要有几个概念：<br>1：栈这个概念是人来定义的，cpu和内存不知道有“栈”这个概念，cpu只知道一步一步地执行指令<br>2：栈不是一个固定的空间，我们定义栈在哪儿（通过修改ebp、esp的值），有多大（但需要在一开始申请内存，不能超出这个内存，否则覆盖了某些重要的数据/代码，就会让程序崩溃，实际上申请的空间也是很小一块），栈就是怎样的<br>3：栈的模式是从高地址往低地址增长，也可以说压栈是把数据先压入栈（我们用ebp和esp定义的内存范围）这个空间里最高地址的内存单元中，并且遵守小端序的规则</p><h1 id="理解几个名词"><a href="#理解几个名词" class="headerlink" title="理解几个名词"></a>理解几个名词</h1><p><strong>栈帧</strong>：函数调用栈在内存中创造出来的临时空间，一个函数调用一个栈帧，函数调用完毕后栈帧自动销毁<br><strong>ebp</strong>：寄存器，存放函数栈底的地址的值（永远指向栈底）<br><strong>esp</strong>：寄存器，存放函数栈顶的地址的值（永远指向栈顶）<br><img src="https://i-blog.csdnimg.cn/direct/529d03ed97e449eba4dd3940dda88be4.png#pic_center" alt="栈帧"><br>                                                                （一个32位架构下栈帧示意图）<br><strong>Return address（返回地址）</strong>：位于父函数栈帧和子函数栈帧交界处，存放的是：在子函数调用完之后，eip返回到的地址，也就是返回到父函数调用子函数的下一条指令<br><strong>Stack frame pointer：</strong>位于父函数栈帧和子函数栈帧交界处，但位置比返回地址高，存放上一个栈帧的栈底的值（也就是父函数栈帧的栈底的地址）<br><strong>Local variables</strong>：存放局部变量的地方<br><strong>arguments（参数）</strong>：32位架构下，子函数所用参数实际上是保存在父函数栈帧的底部的，参数部分保存的也就是子函数用到的形参（c语言函数里的形参），并且压入栈是逆序压入的，从右往左，这是需要注意地方</p><h1 id="函数调用栈过程"><a href="#函数调用栈过程" class="headerlink" title="函数调用栈过程"></a>函数调用栈过程</h1><p><strong>先简单概括下：</strong><br>（此时是父函数的栈帧）<br>第一步：把子函数需要的形参压入栈内（逆序）<br>第二步：将调用子函数这条指令的下一条指令的地址压入栈内，称为返回地址<br>第三步：把当前ebp的值（父函数栈底的地址）压入栈内，同时把当前栈顶的地址送入ebp（也就是mov ebp，esp）<br>，这样ebp就成功成为了子函数的栈底<br>（此时是子函数的栈帧）<br>第四步：把子函数的局部变量压入栈内<br><strong>然后开始执行子函数的各种指令，在这期间会调用存入的局部变量，与本次周报“函数调用栈“的主线不怎么相关</strong><br><strong><em>执行完任务之后，如何销毁子函数的栈帧，回到父函数继续执行父函数的下一步指令呢？</em></strong><br>第五步：将esp不断增大，此时esp会一路向栈底移动，直到指向的地址与栈底（ebp）指向的值相同<br><strong>此时栈顶存放的值是什么？是父函数栈底的地址</strong><br>第六步：于是pop ebp，让ebp的值被覆盖为父函数的栈底地址，于是ebp再次指向父函数的栈底，esp也顺势指向父函数栈顶<br>第七步：ret（pop eip），将栈内存放的父函数下一条指令的地址传送到eip，于是继续执行调用子函数这条指令的下一条指令，一切又回到调用子函数前的状态<br><strong>至此，一次简单的函数调用栈完成</strong><br><strong>几个值得注意的点：</strong><br>1.在第五步中，我们并不是将局部变量的值弹出了栈，而是通过改变栈顶的位置，来改变栈的大小，实际上，存储局部变量的内存单元的值没有改变！这也和我们一开始要理解的几点概念相吻合：栈在哪，有多大，由人来定义<br>2.pop和push都是一个字长的值，32位字长是4字节，64位字长是8字节<br>3.第二步中，用的汇编指令是call指令，而非jmp，call指令的好处是会在栈中压入父函数下一条指令的地址，也就是return address（返回地址）<br>4.ret指令相当于pop eip（不能这样写），但是不能用pop指令直接把值送入该寄存器（如果能直接送，会导致很严重的后果，基于安全问题），所以只能用ret指令，所以我们通过修改返回地址来达到控制程序执行流的目的，这也就是最基本的栈溢出</p>]]></content>
+    
+    
+      
+      
+    <summary type="html">&lt;h1 id=&quot;前言&quot;&gt;&lt;a href=&quot;#前言&quot; class=&quot;headerlink&quot; title=&quot;前言&quot;&gt;&lt;/a&gt;前言&lt;/h1&gt;&lt;p&gt;看完王爽的《汇编语言》后，以及上学期的c语言学习之后，再次深入学习函数调用栈原理时，发现自己的笔记有很多错误和疏漏，所以在此进行纠正和补充。</summary>
+      
+    
+    
+    
+    
+    <category term="栈溢出基础 栈溢出 ret2text" scheme="http://jixiajianjiu.github.io/tags/%E6%A0%88%E6%BA%A2%E5%87%BA%E5%9F%BA%E7%A1%80-%E6%A0%88%E6%BA%A2%E5%87%BA-ret2text/"/>
+    
+  </entry>
+  
+</feed>
